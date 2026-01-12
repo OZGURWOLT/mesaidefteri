@@ -11,7 +11,6 @@ const nextConfig = {
   experimental: {
     optimizeCss: true,
     optimizePackageImports: ['lucide-react', '@prisma/client'],
-    isrMemoryCacheSize: 0, // ISR cache'i devre dışı bırak (build-time prerender'ı engelle)
   },
   
   // Build sırasında ESLint ve TypeScript hatalarını görmezden gel

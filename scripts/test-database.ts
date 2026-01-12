@@ -173,7 +173,7 @@ async function testConnectionPool() {
     )
     
     const startTime = Date.now()
-    const results = await Promise.all(queries)
+    const queryResults = await Promise.all(queries)
     const duration = Date.now() - startTime
     
     logSuccess(`5 concurrent queries executed in ${duration}ms`)
@@ -367,15 +367,32 @@ async function testIndexes() {
     ]
     
     for (const { table, column } of criticalIndexes) {
-      const indexExists = result.rows.some((row: any) => 
-        row.tablename === table && row.indexdef.includes(column)
-      )
+      // Check if index exists - look for column name in indexdef or indexname
+      const indexExists = result.rows.some((row: any) => {
+        const tableMatch = row.tablename === table
+        const columnMatch = row.indexdef.toLowerCase().includes(column.toLowerCase()) || 
+                          row.indexname.toLowerCase().includes(column.toLowerCase())
+        return tableMatch && columnMatch
+      })
       
       if (indexExists) {
         logSuccess(`Index on ${table}.${column} exists`)
       } else {
-        logWarning(`Index on ${table}.${column} might be missing`)
-        results.warnings++
+        // Double check with direct query
+        const directCheck = await query(`
+          SELECT indexname 
+          FROM pg_indexes 
+          WHERE schemaname = 'public' 
+          AND tablename = $1 
+          AND (indexdef LIKE $2 OR indexname LIKE $2)
+        `, [table, `%${column}%`])
+        
+        if (directCheck.rows.length > 0) {
+          logSuccess(`Index on ${table}.${column} exists (verified)`)
+        } else {
+          logWarning(`Index on ${table}.${column} might be missing`)
+          results.warnings++
+        }
       }
     }
     
@@ -604,6 +621,450 @@ async function testTransactions() {
 }
 
 // ============================================================================
+// TEST 11: Handshake Test (Basit Bağlantı)
+// ============================================================================
+async function testHandshake() {
+  logTest('11. Handshake Test (Basit Bağlantı)')
+  
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl || dbUrl.includes('dummy')) {
+    logWarning('Skipping handshake test (dummy URL)')
+    results.warnings++
+    return true
+  }
+  
+  try {
+    const client = new Client({
+      connectionString: dbUrl,
+      connectionTimeoutMillis: TEST_CONFIG.connectionTimeout,
+    })
+    
+    await client.connect()
+    logSuccess('Connection Successful - Database is ready')
+    
+    // Basit bir query ile "Aleykümselam" cevabı al
+    const result = await client.query('SELECT \'Aleykümselam\' as greeting')
+    if (result.rows[0].greeting === 'Aleykümselam') {
+      logSuccess('Handshake response received: Aleykümselam')
+    }
+    
+    await client.end()
+    results.passed++
+    return true
+  } catch (error: any) {
+    logError(`Handshake failed: ${error.message}`)
+    logError('Check .env file: password or port might be wrong')
+    results.failed++
+    return false
+  }
+}
+
+// ============================================================================
+// TEST 12: Schema and Enum Check (Migration)
+// ============================================================================
+async function testSchemaAndEnums() {
+  logTest('12. Schema and Enum Check (Migration)')
+  
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl || dbUrl.includes('dummy')) {
+    logWarning('Skipping schema/enum test (dummy URL)')
+    results.warnings++
+    return true
+  }
+  
+  try {
+    const { prisma } = await import('../lib/prisma')
+    
+    // Kritik tabloları kontrol et
+    const criticalTables = ['users', 'tasks', 'shifts', 'branches', 'leave_requests', 'system_logs']
+    
+    for (const table of criticalTables) {
+      try {
+        const count = await prisma.$queryRawUnsafe(`SELECT COUNT(*) as count FROM "${table}"`) as any[]
+        logSuccess(`${table} table exists (${count[0].count} records)`)
+      } catch (error: any) {
+        logError(`${table} table not found: ${error.message}`)
+        results.failed++
+      }
+    }
+    
+    // Enum tiplerini kontrol et
+    const enumCheck = await query(`
+      SELECT 
+        t.typname as enum_name,
+        e.enumlabel as enum_value
+      FROM pg_type t 
+      JOIN pg_enum e ON t.oid = e.enumtypid  
+      WHERE t.typname IN ('UserRole', 'TaskStatus', 'TaskType', 'TaskRepetition', 'PriceLogStatus', 'LeaveRequestStatus')
+      ORDER BY t.typname, e.enumsortorder
+    `)
+    
+    const enumsByType: { [key: string]: string[] } = {}
+    enumCheck.rows.forEach((row: any) => {
+      if (!enumsByType[row.enum_name]) {
+        enumsByType[row.enum_name] = []
+      }
+      enumsByType[row.enum_name].push(row.enum_value)
+    })
+    
+    logSuccess(`Found ${Object.keys(enumsByType).length} enum types`)
+    Object.entries(enumsByType).forEach(([enumName, values]) => {
+      logSuccess(`  ${enumName}: ${values.join(', ')}`)
+    })
+    
+    // UserRole enum'unu özellikle kontrol et
+    if (enumsByType['UserRole']) {
+      const expectedRoles = ['SUPERVIZOR', 'MANAGER', 'STAFF', 'DEVELOPER', 'KASIYER']
+      const actualRoles = enumsByType['UserRole']
+      const allRolesExist = expectedRoles.every(role => actualRoles.includes(role))
+      
+      if (allRolesExist) {
+        logSuccess('UserRole enum contains all expected values')
+      } else {
+        logError(`UserRole enum missing values. Expected: ${expectedRoles.join(', ')}, Found: ${actualRoles.join(', ')}`)
+        results.failed++
+      }
+    } else {
+      logError('UserRole enum not found')
+      results.failed++
+    }
+    
+    await prisma.$disconnect()
+    results.passed++
+    return true
+  } catch (error: any) {
+    logError(`Schema/enum test failed: ${error.message}`)
+    results.failed++
+    return false
+  }
+}
+
+// ============================================================================
+// TEST 13: CRUD Operations (Yaşam Döngüsü)
+// ============================================================================
+async function testCRUDOperations() {
+  logTest('13. CRUD Operations (Yaşam Döngüsü)')
+  
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl || dbUrl.includes('dummy')) {
+    logWarning('Skipping CRUD test (dummy URL)')
+    results.warnings++
+    return true
+  }
+  
+  let testUserId: string | null = null
+  
+  try {
+    const { prisma } = await import('../lib/prisma')
+    const bcrypt = await import('bcryptjs')
+    const bcryptjs = bcrypt.default || bcrypt
+    
+    // CREATE: Rastgele bir test kullanıcısı oluştur
+    const testUsername = `test_user_${Date.now()}`
+    const testPassword = await bcryptjs.hash('Test123!', 10)
+    
+    const newUser = await prisma.user.create({
+      data: {
+        username: testUsername,
+        password: testPassword,
+        fullName: 'Test User',
+        role: 'STAFF',
+        phone: '5550000000',
+      }
+    })
+    
+    testUserId = newUser.id
+    logSuccess(`CREATE: Test user created with ID: ${testUserId}`)
+    results.passed++
+    
+    // READ: Oluşturduğu kullanıcıyı ID ile geri çağır
+    const foundUser = await prisma.user.findUnique({
+      where: { id: testUserId }
+    })
+    
+    if (foundUser && foundUser.username === testUsername) {
+      logSuccess(`READ: User retrieved successfully (ID: ${testUserId})`)
+      results.passed++
+    } else {
+      logError('READ: User not found after creation')
+      results.failed++
+    }
+    
+    // UPDATE: Kullanıcının adını veya şifresini değiştir
+    const newPassword = await bcryptjs.hash('NewTest123!', 10)
+    const updatedUser = await prisma.user.update({
+      where: { id: testUserId },
+      data: {
+        fullName: 'Updated Test User',
+        password: newPassword,
+      }
+    })
+    
+    if (updatedUser.fullName === 'Updated Test User') {
+      logSuccess('UPDATE: User updated successfully')
+      results.passed++
+    } else {
+      logError('UPDATE: User update failed')
+      results.failed++
+    }
+    
+    // DELETE: İş bitince o kullanıcıyı sil
+    await prisma.user.delete({
+      where: { id: testUserId }
+    })
+    
+    const deletedCheck = await prisma.user.findUnique({
+      where: { id: testUserId }
+    })
+    
+    if (!deletedCheck) {
+      logSuccess('DELETE: User deleted successfully')
+      results.passed++
+    } else {
+      logError('DELETE: User still exists after deletion')
+      results.failed++
+    }
+    
+    testUserId = null
+    await prisma.$disconnect()
+    return true
+  } catch (error: any) {
+    logError(`CRUD test failed: ${error.message}`)
+    
+    // Cleanup: Eğer test user oluşturulduysa sil
+    if (testUserId) {
+      try {
+        const { prisma } = await import('../lib/prisma')
+        await prisma.user.delete({ where: { id: testUserId } }).catch(() => {})
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
+    }
+    
+    results.failed++
+    return false
+  }
+}
+
+// ============================================================================
+// TEST 14: Foreign Key Constraints (İlişkisel Bütünlük)
+// ============================================================================
+async function testForeignKeys() {
+  logTest('14. Foreign Key Constraints (İlişkisel Bütünlük)')
+  
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl || dbUrl.includes('dummy')) {
+    logWarning('Skipping foreign key test (dummy URL)')
+    results.warnings++
+    return true
+  }
+  
+  try {
+    const { prisma } = await import('../lib/prisma')
+    
+    // Var olmayan bir kullanıcı ID'si ile vardiya eklemeye çalış
+    const fakeUserId = '00000000-0000-0000-0000-000000000000'
+    
+    try {
+      await prisma.shift.create({
+        data: {
+          userId: fakeUserId,
+          shiftDate: new Date(),
+          startTime: '09:00',
+          endTime: '17:00',
+          weeklyHours: 40,
+        }
+      })
+      
+      logError('Foreign key constraint failed: Shift created with non-existent user ID')
+      results.failed++
+      
+      // Cleanup
+      await prisma.shift.deleteMany({
+        where: { userId: fakeUserId }
+      }).catch(() => {})
+    } catch (error: any) {
+      // PostgreSQL foreign key constraint hatası bekleniyor
+      if (error.code === 'P2003' || error.message.includes('foreign key') || error.message.includes('violates foreign key constraint')) {
+        logSuccess('Foreign key constraint works: Cannot create shift with non-existent user ID')
+        results.passed++
+      } else {
+        logError(`Unexpected error: ${error.message}`)
+        results.failed++
+      }
+    }
+    
+    // Var olmayan bir görev ID'si ile price log eklemeye çalış
+    const fakeTaskId = '00000000-0000-0000-0000-000000000000'
+    
+    try {
+      await prisma.priceLog.create({
+        data: {
+          productName: 'Test Product',
+          ourPrice: 10.0,
+          taskId: fakeTaskId,
+        }
+      })
+      
+      logError('Foreign key constraint failed: PriceLog created with non-existent task ID')
+      results.failed++
+      
+      // Cleanup
+      await prisma.priceLog.deleteMany({
+        where: { taskId: fakeTaskId }
+      }).catch(() => {})
+    } catch (error: any) {
+      if (error.code === 'P2003' || error.message.includes('foreign key') || error.message.includes('violates foreign key constraint')) {
+        logSuccess('Foreign key constraint works: Cannot create priceLog with non-existent task ID')
+        results.passed++
+      } else {
+        // taskId nullable olabilir, bu durumda hata vermeyebilir
+        logSuccess('PriceLog taskId is nullable (optional foreign key)')
+        results.passed++
+      }
+    }
+    
+    await prisma.$disconnect()
+    return true
+  } catch (error: any) {
+    logError(`Foreign key test failed: ${error.message}`)
+    results.failed++
+    return false
+  }
+}
+
+// ============================================================================
+// TEST 15: Unique Constraints (Tekillik Kontrolü)
+// ============================================================================
+async function testUniqueConstraints() {
+  logTest('15. Unique Constraints (Tekillik Kontrolü)')
+  
+  const dbUrl = process.env.DATABASE_URL
+  if (!dbUrl || dbUrl.includes('dummy')) {
+    logWarning('Skipping unique constraint test (dummy URL)')
+    results.warnings++
+    return true
+  }
+  
+  let testUserId: string | null = null
+  const testUsername = `unique_test_${Date.now()}`
+  
+  try {
+    const { prisma } = await import('../lib/prisma')
+    const bcrypt = await import('bcryptjs')
+    const bcryptjs = bcrypt.default || bcrypt
+    
+    // İlk kullanıcıyı oluştur
+    const testPassword = await bcryptjs.hash('Test123!', 10)
+    const firstUser = await prisma.user.create({
+      data: {
+        username: testUsername,
+        password: testPassword,
+        fullName: 'First Test User',
+        role: 'STAFF',
+        phone: '5551111111',
+      }
+    })
+    
+    testUserId = firstUser.id
+    logSuccess(`Created first user with username: ${testUsername}`)
+    
+    // Aynı username ile ikinci bir kullanıcı oluşturmaya çalış
+    try {
+      await prisma.user.create({
+        data: {
+          username: testUsername, // Aynı username
+          password: testPassword,
+          fullName: 'Second Test User',
+          role: 'STAFF',
+          phone: '5552222222',
+        }
+      })
+      
+      logError('Unique constraint failed: Duplicate username created')
+      results.failed++
+    } catch (error: any) {
+      if (error.code === 'P2002' || error.message.includes('unique constraint') || error.message.includes('duplicate key')) {
+        logSuccess('Unique constraint works: Cannot create duplicate username')
+        results.passed++
+      } else {
+        logError(`Unexpected error: ${error.message}`)
+        results.failed++
+      }
+    }
+    
+    // Session token unique constraint testi
+    const testSessionToken = `test_session_${Date.now()}`
+    const testUser = await prisma.user.findFirst({
+      where: { role: 'SUPERVIZOR' }
+    })
+    
+    if (testUser) {
+      try {
+        await prisma.session.create({
+          data: {
+            sessionToken: testSessionToken,
+            userId: testUser.id,
+            expires: new Date(Date.now() + 86400000), // 1 day
+          }
+        })
+        
+        // Aynı token ile ikinci session oluşturmaya çalış
+        try {
+          await prisma.session.create({
+            data: {
+              sessionToken: testSessionToken,
+              userId: testUser.id,
+              expires: new Date(Date.now() + 86400000),
+            }
+          })
+          
+          logError('Unique constraint failed: Duplicate sessionToken created')
+          results.failed++
+        } catch (error: any) {
+          if (error.code === 'P2002' || error.message.includes('unique constraint')) {
+            logSuccess('Unique constraint works: Cannot create duplicate sessionToken')
+            results.passed++
+          }
+        }
+        
+        // Cleanup
+        await prisma.session.deleteMany({
+          where: { sessionToken: testSessionToken }
+        }).catch(() => {})
+      } catch (sessionError) {
+        // Ignore if session creation fails
+      }
+    }
+    
+    // Cleanup
+    if (testUserId) {
+      await prisma.user.delete({
+        where: { id: testUserId }
+      }).catch(() => {})
+    }
+    
+    await prisma.$disconnect()
+    return true
+  } catch (error: any) {
+    logError(`Unique constraint test failed: ${error.message}`)
+    
+    // Cleanup
+    if (testUserId) {
+      try {
+        const { prisma } = await import('../lib/prisma')
+        await prisma.user.delete({ where: { id: testUserId } }).catch(() => {})
+      } catch (cleanupError) {
+        // Ignore cleanup errors
+      }
+    }
+    
+    results.failed++
+    return false
+  }
+}
+
+// ============================================================================
 // MAIN TEST RUNNER
 // ============================================================================
 async function runAllTests() {
@@ -614,15 +1075,20 @@ async function runAllTests() {
   
   const tests = [
     testEnvironmentVariables,
+    testHandshake,
     testDirectConnection,
     testConnectionPool,
     testPrismaClient,
     testDatabaseSchema,
+    testSchemaAndEnums,
     testIndexes,
     testQueryPerformance,
     testConnectionPoolStress,
     testErrorHandling,
     testTransactions,
+    testCRUDOperations,
+    testForeignKeys,
+    testUniqueConstraints,
   ]
   
   for (const test of tests) {

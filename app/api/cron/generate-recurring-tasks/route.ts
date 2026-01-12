@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Client } from 'pg'
 
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 /**
  * Tekrarlayan görevleri oluştur (Cron Job)
  * Her gece çalışacak ve şablon görevlerden yeni görevler oluşturacak

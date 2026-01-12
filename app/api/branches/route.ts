@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireManagerOrSupervisor } from '@/lib/auth-helpers'
 import { Client } from 'pg'
 
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 /**
  * Şubeleri getir (GET)
  * MANAGER veya SUPERVIZOR erişebilir

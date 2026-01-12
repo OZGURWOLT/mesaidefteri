@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth-helpers'
 import { Client } from 'pg'
 
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 // Kullanıcıya atanmış görevleri getir (GET)
 export async function GET(request: NextRequest) {
   const client = new Client({
