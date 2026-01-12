@@ -27,7 +27,8 @@
   "ts-node": {
     "compilerOptions": {
       "module": "commonjs",
-      "esModuleInterop": true
+      "esModuleInterop": true,
+      "skipLibCheck": true
     },
     "esm": false
   }
