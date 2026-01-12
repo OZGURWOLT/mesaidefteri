@@ -74,3 +74,18 @@ export async function deleteImage(publicId: string): Promise<void> {
     throw new Error('Fotoğraf silinirken bir hata oluştu')
   }
 }
+
+/**
+ * Fotoğrafı Cloudinary'ye yükler (client-side için wrapper)
+ * @param file - File objesi
+ * @returns Cloudinary URL'i
+ */
+export async function uploadToCloudinary(file: File): Promise<string | null> {
+  try {
+    const result = await uploadImage(file)
+    return result.secure_url
+  } catch (error) {
+    console.error('Cloudinary upload error:', error)
+    return null
+  }
+}

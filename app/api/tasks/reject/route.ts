@@ -86,13 +86,13 @@ export async function POST(request: NextRequest) {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())`,
         [
           'task_rejected',
-          `${currentUser.fullName || 'Yönetici'} - "${task.title}" görevini reddetti`,
+          `${currentUser.name || currentUser.username || 'Yönetici'} - "${task.title}" görevini reddetti`,
           task.assignedTo,
           taskId,
           assignedUser?.branchId || null,
           JSON.stringify({
             taskTitle: task.title,
-            rejectedBy: currentUser.fullName || currentUser.id,
+            rejectedBy: currentUser.name || currentUser.username || currentUser.id,
             reason: rejectionMessage
           })
         ]

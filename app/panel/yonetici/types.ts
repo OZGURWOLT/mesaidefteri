@@ -3,15 +3,32 @@ export interface Staff {
   name: string
   surname: string
   role: string
+  displayRole?: string
+  staffDuty?: string | null
+  branchId?: string | null
+  branchName?: string | null
   shiftActive: boolean
   lastLocation: string
-  shiftStartTime?: string
-  shiftEndTime?: string
+  shiftStartTime?: string | null
+  shiftEndTime?: string | null
+  loginTime?: string | null
+  loginTimeRaw?: string | null
+  logoutTime?: string | null
+  logoutTimeRaw?: string | null
   onLeave?: boolean
   totalTasks: number
   pendingApprovals: number
   incompleteTasks: number
   successRate: number
+  workScheduleType?: string | null
+  workScheduleTypeDisplay?: string
+  shiftStartTimeDisplay?: string
+  workEndTimeDisplay?: string
+  fixedWorkStartTime?: string | null
+  fixedWorkEndTime?: string | null
+  fixedWorkOffDay?: string | null
+  shiftSchedule?: any | null
+  isBeingMonitored?: boolean
   avatar?: string
 }
 

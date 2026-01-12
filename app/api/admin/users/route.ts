@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
       }
       
       // 10 haneli ve 5 ile başlamalı
-      if (formattedPhone.length !== 10 || !formattedPhone.startsWith('5')) {
+      if (!formattedPhone || formattedPhone.length !== 10 || !formattedPhone.startsWith('5')) {
         return NextResponse.json(
           { error: 'Geçerli bir telefon numarası giriniz (5xxXXXxxxx formatında)' },
           { status: 400 }
@@ -277,7 +277,7 @@ export async function POST(request: NextRequest) {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())`,
         [
           'user_created',
-          `${currentUser.fullName || 'Yönetici'} - "${fullName}" (${role}) kullanıcısı oluşturuldu`,
+          `${currentUser.name || currentUser.username || 'Yönetici'} - "${fullName}" (${role}) kullanıcısı oluşturuldu`,
           newUser.id,
           branchId || null,
           JSON.stringify({

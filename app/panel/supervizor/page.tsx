@@ -1,4 +1,5 @@
 'use client'
+export const dynamic = 'force-dynamic'
 
 import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
@@ -279,7 +280,7 @@ export default function SupervizorDashboard() {
       type: 'supervisor_override',
       description: `Görev ${action === 'approve' ? 'zorla onaylandı' : 'zorla reddedildi'}`,
       taskId: taskId,
-      branch: selectedBranch === 'all' ? 'Tüm Şubeler' : mockBranches.find(b => b.id === selectedBranch)?.name || '',
+      branch: selectedBranch === 'all' ? 'Tüm Şubeler' : '',
       details: { action, reason: 'Süpervizör müdahalesi' }
     }
     setLogs(prev => [newLog, ...prev])

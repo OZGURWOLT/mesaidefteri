@@ -132,7 +132,7 @@ export async function sendAlert(params: SendAlertParams): Promise<SmsResponse> {
   try {
     const url = 'https://api.netgsm.com.tr/sms/rest/v2/send'
     
-    const requestData = {
+    const requestData: any = {
       msgheader,
       messages: [
         {

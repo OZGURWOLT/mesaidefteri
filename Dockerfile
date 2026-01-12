@@ -28,7 +28,12 @@ COPY . .
 RUN npx prisma generate
 
 # Build Next.js application
+# Build-time için DATABASE_URL gerekli (Prisma client validation için)
+# Runtime'da docker-compose üzerinden .env dosyası kullanılacak
 ENV NEXT_TELEMETRY_DISABLED 1
+# Build-time için dummy DATABASE_URL (sadece validation için)
+# Runtime'da gerçek DATABASE_URL docker-compose üzerinden gelecek
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy?schema=public"
 RUN npm run build
 
 # Production image, copy all the files and run next

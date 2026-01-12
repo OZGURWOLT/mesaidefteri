@@ -1,4 +1,5 @@
 'use client'
+export const dynamic = 'force-dynamic'
 
 import { useState, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
@@ -14,7 +15,6 @@ import {
   Calendar
 } from 'lucide-react'
 import ImageUploader from '@/components/ui/ImageUploader'
-import { uploadToCloudinary } from '@/lib/cloudinary'
 
 interface Task {
   id: string
@@ -64,25 +64,9 @@ export default function GorevDetayPage() {
     }
   }, [taskId])
 
-  // Fotoğraf yükleme
-  const handlePhotoUpload = async (files: File[]) => {
-    try {
-      const uploadedUrls: string[] = []
-      for (const file of files) {
-        const url = await uploadToCloudinary(file)
-        if (url) {
-          uploadedUrls.push(url)
-        }
-      }
-      setPhotos(prev => [...prev, ...uploadedUrls])
-    } catch (err: any) {
-      setError('Fotoğraf yüklenirken bir hata oluştu: ' + err.message)
-    }
-  }
-
-  // Fotoğraf silme
-  const handlePhotoRemove = (index: number) => {
-    setPhotos(prev => prev.filter((_, i) => i !== index))
+  // Fotoğraf değişikliği
+  const handlePhotosChange = (urls: string[]) => {
+    setPhotos(urls)
   }
 
   // Görevi tamamla
@@ -245,31 +229,10 @@ export default function GorevDetayPage() {
           </h2>
 
           <ImageUploader
-            onUpload={handlePhotoUpload}
-            maxFiles={10}
-            accept="image/*"
+            value={photos}
+            onChange={handlePhotosChange}
+            maxImages={10}
           />
-
-          {/* Yüklenen Fotoğraflar */}
-          {photos.length > 0 && (
-            <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4">
-              {photos.map((photo, index) => (
-                <div key={index} className="relative group">
-                  <img
-                    src={photo}
-                    alt={`Fotoğraf ${index + 1}`}
-                    className="w-full h-32 object-cover rounded-lg"
-                  />
-                  <button
-                    onClick={() => handlePhotoRemove(index)}
-                    className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Tamamla Butonu */}

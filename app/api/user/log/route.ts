@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { requireAuth } from '@/lib/auth-helpers'
 import { UserActivityType } from '@prisma/client'
 import { Client } from 'pg'
 
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
+
 export async function POST(request: NextRequest) {
   try {
+    // Build-time check
+    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('dummy')) {
+      return NextResponse.json({ success: false, error: 'Build-time: route not available' }, { status: 503 })
+    }
+    
     // Session'dan kullanıcıyı al
     const currentUser = await requireAuth()
     
@@ -19,6 +26,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // Lazy import - sadece runtime'da import et
+    const { prisma } = await import('@/lib/prisma')
 
     // UserActivity kaydı oluştur
     const activity = await prisma.userActivity.create({

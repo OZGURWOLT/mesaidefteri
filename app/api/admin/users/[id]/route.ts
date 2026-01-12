@@ -268,7 +268,7 @@ export async function PUT(
         }
         
         // 10 haneli ve 5 ile başlamalı
-        if (formattedPhone.length !== 10 || !formattedPhone.startsWith('5')) {
+        if (!formattedPhone || formattedPhone.length !== 10 || !formattedPhone.startsWith('5')) {
           await client.end()
           return NextResponse.json(
             { error: 'Geçerli bir telefon numarası giriniz (5xxXXXxxxx formatında)' },

@@ -94,13 +94,13 @@ export async function POST(request: NextRequest) {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())`,
         [
           'task_approved',
-          `${currentUser.fullName || 'Yönetici'} - "${task.title}" görevini onayladı`,
+          `${currentUser.name || currentUser.username || 'Yönetici'} - "${task.title}" görevini onayladı`,
           task.assignedTo,
           taskId,
           assignedUser?.branchId || null,
           JSON.stringify({
             taskTitle: task.title,
-            approvedBy: currentUser.fullName || currentUser.id,
+            approvedBy: currentUser.name || currentUser.username || currentUser.id,
             points: pointsValue
           })
         ]

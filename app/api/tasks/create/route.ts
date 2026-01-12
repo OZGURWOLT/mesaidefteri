@@ -135,14 +135,14 @@ export async function POST(request: NextRequest) {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())`,
         [
           'task_created',
-          `${currentUser.fullName || 'Yönetici'} - "${title}" görevi ${assignedUser?.fullName || 'Personel'}'ye atandı`,
+          `${currentUser.name || currentUser.username || 'Yönetici'} - "${title}" görevi ${assignedUser?.fullName || 'Personel'}'ye atandı`,
           assignedTo,
           newTask.id,
           assignedUser?.branchId || null,
           JSON.stringify({
             taskTitle: title,
             taskType: type,
-            assignedBy: currentUser.fullName || currentUser.id,
+            assignedBy: currentUser.name || currentUser.username || currentUser.id,
             assignedTo: assignedUser?.fullName || assignedTo
           })
         ]
