@@ -1,104 +1,96 @@
 #!/bin/bash
 
-# Mesaidefteri Deployment Script
-# Usage: ./deploy.sh [environment]
+# Git-based Deployment Script
+# Local'de geliştirme yapıp Git ile server'a deploy eder
 
 set -e
 
 ENVIRONMENT=${1:-production}
-COMPOSE_FILE="docker-compose.prod.yml"
-
-echo "🚀 Mesaidefteri Deployment Script"
-echo "Environment: $ENVIRONMENT"
-echo ""
+SSH_HOST=${2:-mesaidefteri-prod}
+REMOTE_PATH="/opt/mesaidefteri"
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Check if .env exists
-if [ ! -f .env ]; then
-    echo -e "${RED}❌ .env file not found!${NC}"
-    echo "Please copy .env.example to .env and fill in the values."
-    exit 1
-fi
+echo -e "${GREEN}🚀 Mesaidefteri Git Deployment${NC}"
+echo -e "Environment: ${YELLOW}$ENVIRONMENT${NC}"
+echo -e "SSH Host: ${YELLOW}$SSH_HOST${NC}"
+echo ""
 
-# Check if Docker is running
-if ! docker info > /dev/null 2>&1; then
-    echo -e "${RED}❌ Docker is not running!${NC}"
-    exit 1
-fi
-
-# Check if docker-compose is available
-if ! command -v docker-compose &> /dev/null; then
-    echo -e "${RED}❌ docker-compose not found!${NC}"
-    exit 1
-fi
-
-echo -e "${YELLOW}📦 Building Docker images...${NC}"
-docker-compose -f $COMPOSE_FILE build --no-cache
-
-echo -e "${YELLOW}🛑 Stopping existing containers...${NC}"
-docker-compose -f $COMPOSE_FILE down
-
-echo -e "${YELLOW}🗄️  Starting database...${NC}"
-docker-compose -f $COMPOSE_FILE up -d db
-
-echo -e "${YELLOW}⏳ Waiting for database to be ready...${NC}"
-sleep 10
-
-# Check database health
-for i in {1..30}; do
-    if docker-compose -f $COMPOSE_FILE exec -T db pg_isready -U ${POSTGRES_USER:-ebubekir} > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Database is ready!${NC}"
-        break
-    fi
-    if [ $i -eq 30 ]; then
-        echo -e "${RED}❌ Database failed to start!${NC}"
+# Check if there are uncommitted changes
+if ! git diff-index --quiet HEAD --; then
+    echo -e "${YELLOW}⚠️  Uncommitted changes detected${NC}"
+    read -p "Do you want to commit and push? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}📝 Committing changes...${NC}"
+        git add .
+        read -p "Commit message: " COMMIT_MSG
+        git commit -m "${COMMIT_MSG:-Deployment commit}"
+    else
+        echo -e "${RED}❌ Deployment cancelled${NC}"
         exit 1
     fi
-    sleep 1
-done
+fi
 
-echo -e "${YELLOW}🔄 Running database migrations...${NC}"
-docker-compose -f $COMPOSE_FILE run --rm app npx prisma migrate deploy || {
-    echo -e "${YELLOW}⚠️  Migration failed, trying to generate Prisma client...${NC}"
-    docker-compose -f $COMPOSE_FILE run --rm app npx prisma generate
+# Push to GitHub
+echo -e "${YELLOW}📤 Pushing to GitHub...${NC}"
+git push origin main || {
+    echo -e "${RED}❌ Git push failed!${NC}"
+    exit 1
 }
-
-echo -e "${YELLOW}🚀 Starting all services...${NC}"
-docker-compose -f $COMPOSE_FILE up -d
-
-echo -e "${YELLOW}⏳ Waiting for services to be ready...${NC}"
-sleep 15
-
-# Health check
-echo -e "${YELLOW}🏥 Checking service health...${NC}"
-for i in {1..10}; do
-    if curl -f http://localhost/api/health > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Application is healthy!${NC}"
-        break
-    fi
-    if [ $i -eq 10 ]; then
-        echo -e "${RED}❌ Health check failed!${NC}"
-        echo "Checking logs..."
-        docker-compose -f $COMPOSE_FILE logs --tail=50 app
-        exit 1
-    fi
-    sleep 2
-done
-
+echo -e "${GREEN}✅ Pushed to GitHub${NC}"
 echo ""
-echo -e "${GREEN}✅ Deployment completed successfully!${NC}"
-echo ""
-echo "📊 Container Status:"
-docker-compose -f $COMPOSE_FILE ps
 
+# Check SSH connection
+echo -e "${YELLOW}🔍 Checking SSH connection...${NC}"
+if ! ssh -o ConnectTimeout=5 -o BatchMode=yes $SSH_HOST exit 2>/dev/null; then
+    echo -e "${RED}❌ Cannot connect to $SSH_HOST${NC}"
+    echo "Please check your SSH configuration"
+    exit 1
+fi
+echo -e "${GREEN}✅ SSH connection OK${NC}"
 echo ""
-echo "📝 Useful commands:"
-echo "  View logs: docker-compose -f $COMPOSE_FILE logs -f"
-echo "  Stop all: docker-compose -f $COMPOSE_FILE down"
-echo "  Restart: docker-compose -f $COMPOSE_FILE restart"
-echo "  Health check: curl http://localhost/api/health"
+
+# Deploy on server
+echo -e "${YELLOW}🚀 Deploying on server...${NC}"
+ssh $SSH_HOST << EOF
+  set -e
+  cd $REMOTE_PATH || { echo "Directory $REMOTE_PATH not found!"; exit 1; }
+  
+  echo "📥 Pulling latest changes..."
+  git pull origin main || { echo "Git pull failed!"; exit 1; }
+  
+  echo "🔨 Building Docker image..."
+  docker-compose build || { echo "Docker build failed!"; exit 1; }
+  
+  echo "🛑 Stopping existing containers..."
+  docker-compose down || true
+  
+  echo "🚀 Starting new containers..."
+  docker-compose up -d || { echo "Docker compose up failed!"; exit 1; }
+  
+  echo "🧹 Cleaning up..."
+  docker system prune -f
+  
+  echo "✅ Deployment completed!"
+  echo ""
+  echo "📊 Container Status:"
+  docker-compose ps
+EOF
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo -e "${GREEN}✅ Deployment completed successfully!${NC}"
+    echo ""
+    echo "📝 Useful commands:"
+    echo "  View logs: ssh $SSH_HOST 'cd $REMOTE_PATH && docker-compose logs -f'"
+    echo "  Restart: ssh $SSH_HOST 'cd $REMOTE_PATH && docker-compose restart'"
+    echo "  Health check: curl http://your-server-ip/api/health"
+else
+    echo -e "${RED}❌ Deployment failed!${NC}"
+    exit 1
+fi
