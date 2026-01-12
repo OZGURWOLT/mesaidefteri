@@ -1,0 +1,407 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPERVIZOR
+  MANAGER
+  STAFF
+  DEVELOPER
+  KASIYER
+}
+
+enum TaskStatus {
+  BEKLIYOR
+  ONAYLANDI
+  REDDEDILDI
+  pending
+  in_progress
+  completed
+  cancelled
+}
+
+enum TaskType {
+  FIYAT_ARASTIRMASI
+  STANDART_GOREV
+}
+
+enum TaskRepetition {
+  TEK_SEFERLIK
+  GUNLUK
+  HAFTALIK
+}
+
+enum PriceLogStatus {
+  available
+  no_stock
+  equivalent
+  different_weight
+}
+
+enum LeaveRequestStatus {
+  pending
+  approved
+  rejected
+}
+
+enum UserActivityType {
+  LOGIN
+  LOGOUT
+}
+
+model Branch {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  address     String?
+  phone       String?
+  managerId   String?  @unique // User.id (role = MANAGER) - unique çünkü bir yönetici sadece bir şubeye atanabilir
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  manager     User?    @relation("BranchManager", fields: [managerId], references: [id])
+  users       User[]   @relation("BranchUsers")
+  systemLogs  SystemLog[] @relation("SystemLogBranch") // Sistem logları
+
+  @@map("branches")
+}
+
+model User {
+  id           String          @id @default(uuid())
+  username     String          @unique
+  password     String
+  role         UserRole
+  fullName     String
+  phone        String?         // Telefon numarası (SMS için) - Test için unique kaldırıldı
+  branchId     String?         // Branch.id referansı
+  managerId    String?         // Bağlı bulunduğu yöneticinin User.id referansı
+  staffDuty    String?         // Personel görevi (Satınalma, Yazılımcı, Kasiyer, Kurye) - Sadece STAFF rolü için
+  mustChangePassword Boolean   @default(false) // İlk girişte şifre değiştirme zorunluluğu
+  workScheduleType String?     // Mesai türü: SABIT_MESAI, VARDIYALI_MESAI
+  fixedWorkStartTime String?   // Sabit mesai başlama saati (HH:mm formatında)
+  fixedWorkEndTime String?     // Sabit mesai bitiş saati (HH:mm formatında)
+  fixedWorkOffDay String?      // Sabit mesai izin günü (Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar)
+  shiftSchedule String?         // Vardiya çalışma saatleri (JSON formatında: {"Pazartesi": "09:00-17:30", "Salı": "16:30-01:00", ...} veya "off" izinli için)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  // NextAuth ilişkileri
+  accounts     Account[]
+  sessions     Session[]
+
+  // İlişkiler
+  branch           Branch?         @relation("BranchUsers", fields: [branchId], references: [id])
+  managedBranch    Branch?        @relation("BranchManager")
+  manager          User?          @relation("UserManager", fields: [managerId], references: [id])
+  managedUsers     User[]         @relation("UserManager") // Bu yöneticiye bağlı kullanıcılar
+  assignedTasks    Task[]          @relation("AssignedTasks")
+  assignedByTasks  Task[]          @relation("AssignedByUser") // Bu kullanıcının atadığı görevler
+  leaveRequests    LeaveRequest[]
+  notifications    Notification[]
+  scores           UserScore[]
+  activities       UserActivity[]
+  shifts           Shift[]         @relation("UserShifts") // Kullanıcının vardiyaları
+  assignedShifts   Shift[]         @relation("AssignedShifts") // Yöneticinin atadığı vardiyalar
+  smsCodes         SmsCode[]       // OTP kodları
+  systemLogs       SystemLog[]     @relation("SystemLogUser") // Sistem logları
+
+  // Performance indexes
+  @@index([managerId])
+  @@index([branchId])
+  @@index([role])
+  @@index([username])
+  @@map("users")
+}
+
+// NextAuth modelleri
+model Account {
+  id                String  @id @default(uuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Task {
+  id                String          @id @default(uuid())
+  title             String
+  description       String?
+  status            TaskStatus      @default(BEKLIYOR)
+  assignedTo        String          // User.id referansı
+  type              TaskType        // Görev türü (FIYAT_ARASTIRMASI veya STANDART_GOREV)
+  repetition        TaskRepetition  @default(TEK_SEFERLIK) // Tekrar tipi
+  hasCustomDuration Boolean         @default(false) // Süre sınırı var mı?
+  durationMinutes   Int?            // Varsa kaç dakika?
+  isTemplate        Boolean         @default(false) // Şablon mu? (Her gün kopyalanacak)
+  assignedBy        String          // Görevi atayan yöneticinin ID'si
+  assignedAt        DateTime?       // Görev personele atandığı an
+  submittedAt       DateTime?       // Personelin işi bitirip onay beklemeye başladığı an
+  lastReminderSentAt DateTime?      // Son SMS gönderim zamanı
+  photos            String[]        // Fotoğraf URL'leri
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  // İlişkiler
+  assignedUser User? @relation("AssignedTasks", fields: [assignedTo], references: [id])
+  assignedByUser User? @relation("AssignedByUser", fields: [assignedBy], references: [id])
+  priceLogs    PriceLog[] // Görev ile ilişkili fiyat kayıtları
+  notifications Notification[] // Görev ile ilişkili bildirimler
+  smsLogs      SmsLog[] // Görev ile ilişkili SMS logları
+  systemLogs   SystemLog[] @relation("SystemLogTask") // Sistem logları
+
+  // Performance indexes
+  @@index([assignedTo])
+  @@index([status])
+  @@index([submittedAt])
+  @@index([assignedBy])
+  @@index([type])
+  @@index([assignedTo, status]) // Composite index for common queries
+  @@map("tasks")
+}
+
+model PriceLog {
+  id          String          @id @default(uuid())
+  productName String
+  ourPrice    Float
+  migrosPrice Float?
+  getirPrice  Float?
+  a101Price   Float?          // A101 fiyatı
+  sarayPrice  Float?          // Saray fiyatı
+  grossPrice  Float?          // Gross fiyatı
+  status      PriceLogStatus?
+  taskId      String?         // Hangi görevle ilişkili
+  photoUrl    String?         // Fotoğraf URL'i (opsiyonel)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // İlişkiler
+  task Task? @relation(fields: [taskId], references: [id])
+
+  // Performance indexes
+  @@index([taskId])
+  @@index([createdAt])
+  @@map("price_logs")
+}
+
+model LeaveRequest {
+  id          String             @id @default(uuid())
+  startDate   DateTime
+  endDate     DateTime
+  type        String?            // 'annual', 'health', 'excuse'
+  description String?            // İzin açıklaması
+  status      LeaveRequestStatus @default(pending)
+  userId      String             // User.id referansı
+  reviewedBy  String?            // Onaylayan/Reddeden user id (MANAGER veya SUPERVIZOR)
+  reviewedAt  DateTime?          // Onay/Red tarihi
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  // İlişkiler
+  user User? @relation(fields: [userId], references: [id])
+
+  // Performance indexes
+  @@index([userId])
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+  @@index([userId, status]) // Composite index for user's leave requests
+  @@map("leave_requests")
+}
+
+model Shift {
+  id          String   @id @default(uuid())
+  userId      String   // User.id referansı
+  shiftDate   DateTime // Vardiya tarihi
+  startTime   String   // Başlangıç saati (HH:mm)
+  endTime     String   // Bitiş saati (HH:mm)
+  actualStart DateTime? // Gerçek başlangıç zamanı (mesai açıldığında)
+  actualEnd   DateTime? // Gerçek bitiş zamanı (mesai kapandığında)
+  isActive    Boolean  @default(false) // Şu an aktif mi
+  weeklyHours Int      @default(40) // Haftalık çalışma saati
+  assignedBy  String?  // Vardiyayı atayan yönetici id
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // İlişkiler
+  user        User?    @relation("UserShifts", fields: [userId], references: [id])
+  assignedUser User?   @relation("AssignedShifts", fields: [assignedBy], references: [id])
+
+  // Performance indexes
+  @@index([userId])
+  @@index([shiftDate])
+  @@index([isActive])
+  @@index([userId, shiftDate]) // Composite index for user's daily shifts
+  @@map("shifts")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   // Alıcı user id
+  taskId    String?  // İlgili görev id
+  title     String
+  message   String
+  type      String   // 'success', 'error', 'info', 'warning'
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // İlişkiler
+  user User  @relation(fields: [userId], references: [id])
+  task Task? @relation(fields: [taskId], references: [id])
+
+  // Performance indexes
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([userId, isRead]) // Composite index for unread notifications
+  @@map("notifications")
+}
+
+model UserScore {
+  id        String   @id @default(uuid())
+  userId    String   // User.id referansı
+  taskId    String?  // Hangi görev için puan
+  points    Int      // Verilen puan
+  reason    String?  // Puan verme nedeni
+  createdAt DateTime @default(now())
+
+  // İlişkiler
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_scores")
+}
+
+model UserActivity {
+  id        String           @id @default(uuid())
+  userId    String           // User.id referansı
+  type      UserActivityType // LOGIN veya LOGOUT
+  latitude  Float?           // Enlem (opsiyonel - izin verilmezse null)
+  longitude Float?           // Boylam (opsiyonel - izin verilmezse null)
+  createdAt DateTime         @default(now())
+
+  // İlişkiler
+  user User @relation(fields: [userId], references: [id])
+
+  // Performance indexes
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+  @@index([userId, type, createdAt]) // Composite index for user activity queries
+  @@map("user_activities")
+}
+
+model SmsCode {
+  id        String   @id @default(uuid())
+  userId    String   // User.id referansı
+  code      String   // 6 haneli OTP kodu
+  expiresAt DateTime // Kodun geçerlilik süresi
+  used      Boolean  @default(false) // Kod kullanıldı mı?
+  createdAt DateTime @default(now())
+
+  // İlişkiler
+  user User @relation(fields: [userId], references: [id])
+
+  // Performance indexes
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([used])
+  @@index([userId, used, expiresAt]) // Composite index for OTP validation
+  @@map("sms_codes")
+}
+
+model SmsLog {
+  id          String   @id @default(uuid())
+  userId      String?  // Alıcı user id (opsiyonel)
+  taskId      String?  // İlgili görev id (opsiyonel)
+  phone       String   // Gönderilen telefon numarası
+  message     String   // Gönderilen mesaj
+  type        String   // 'otp' veya 'alert'
+  status      String   // 'success', 'failed', 'pending'
+  jobId       String?  // NetGSM job ID
+  errorCode   String?  // Hata kodu (varsa)
+  errorMessage String? // Hata mesajı (varsa)
+  createdAt   DateTime @default(now())
+
+  // İlişkiler
+  task Task? @relation(fields: [taskId], references: [id])
+
+  @@map("sms_logs")
+}
+
+model GlobalSettings {
+  id                  String   @id @default(uuid())
+  locationTolerance   Int      @default(100) // metre
+  delayAlarmMinutes   Int      @default(15) // dakika
+  penaltyPointsMinor  Int      @default(5)
+  penaltyPointsModerate Int    @default(15)
+  penaltyPointsMajor  Int      @default(30)
+  netgsmOtpEnabled    Boolean  @default(false)
+  netgsmAlertEnabled  Boolean  @default(false)
+  netgsmAlertMessage  String?  @db.Text
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("global_settings")
+}
+
+model SystemLog {
+  id          String   @id @default(uuid())
+  type        String   // İşlem tipi: task_completed, user_created, task_assigned, shift_started, shift_ended, login, logout, settings_changed, vb.
+  description String   // İşlem açıklaması
+  userId      String?  // İlgili kullanıcı ID
+  taskId      String?  // İlgili görev ID
+  branchId    String?  // İlgili şube ID
+  details     String?  @db.Text // JSON formatında ek detaylar
+  createdAt   DateTime @default(now())
+
+  // İlişkiler
+  user        User?    @relation("SystemLogUser", fields: [userId], references: [id])
+  task        Task?    @relation("SystemLogTask", fields: [taskId], references: [id])
+  branch      Branch?  @relation("SystemLogBranch", fields: [branchId], references: [id])
+
+  @@index([type])
+  @@index([createdAt])
+  @@index([userId])
+  @@index([branchId])
+  @@index([taskId])
+  @@index([type, createdAt]) // Composite index for filtered log queries
+  @@index([userId, createdAt]) // Composite index for user-specific logs
+  @@map("system_logs")
+}
