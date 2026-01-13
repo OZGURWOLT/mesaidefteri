@@ -75,12 +75,27 @@ function LoginForm() {
           })
         },
         (error) => {
-          reject(error)
+          // Hata kodlarına göre daha detaylı mesaj
+          let errorMessage = 'Konum alınamadı'
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              errorMessage = 'Konum izni reddedildi. Lütfen tarayıcı ayarlarından konum iznini aktif edin.'
+              break
+            case error.POSITION_UNAVAILABLE:
+              errorMessage = 'Konum bilgisi alınamadı. Lütfen internet bağlantınızı kontrol edin.'
+              break
+            case error.TIMEOUT:
+              errorMessage = 'Konum alma işlemi zaman aşımına uğradı. Lütfen tekrar deneyin.'
+              break
+            default:
+              errorMessage = `Konum hatası: ${error.message || 'Bilinmeyen hata'}`
+          }
+          reject(new Error(errorMessage))
         },
         {
-          enableHighAccuracy: true,
-          timeout: 10000, // 10 saniye timeout
-          maximumAge: 0 // Cache kullanma, her zaman yeni konum al
+          enableHighAccuracy: false, // Daha hızlı sonuç için false
+          timeout: 15000, // 15 saniye timeout (artırıldı)
+          maximumAge: 60000 // 1 dakika cache kullan (daha hızlı)
         }
       )
     })
@@ -120,12 +135,27 @@ function LoginForm() {
       let location: { latitude: number; longitude: number } | null = null
       
       try {
-        location = await getCurrentLocation()
+        // Konum alma işlemini timeout ile sınırla
+        location = await Promise.race([
+          getCurrentLocation(),
+          new Promise<null>((_, reject) => 
+            setTimeout(() => reject(new Error('TIMEOUT')), 20000)
+          )
+        ])
       } catch (locationError: any) {
-        // Konum izni reddedildi veya hata oluştu
-        setError('Konum izni olmadan sisteme giriş yapılamaz. Lütfen tarayıcı ayarlarınızdan konum iznini aktif edin.')
-        setLoading(false)
-        return
+        // Konum izni reddedildi mi kontrol et
+        console.error('Konum alma hatası:', locationError)
+        
+        // Sadece izin reddedildiğinde engelle, diğer hatalarda null olarak devam et
+        if (locationError.message && locationError.message.includes('Konum izni reddedildi')) {
+          setError('Konum izni olmadan sisteme giriş yapılamaz. Lütfen tarayıcı ayarlarınızdan konum iznini aktif edin.')
+          setLoading(false)
+          return
+        }
+        
+        // Diğer hatalar (timeout, position unavailable, vb.) için null olarak devam et
+        console.warn('Konum alınamadı ama girişe devam ediliyor:', locationError.message)
+        location = null
       }
 
       // Konum alındıktan sonra giriş işlemini yap

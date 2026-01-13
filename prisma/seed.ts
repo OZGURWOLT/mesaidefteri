@@ -1,4 +1,6 @@
 import { PrismaClient, UserRole } from '@prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { Pool } from 'pg'
 import { config } from 'dotenv'
 import { resolve } from 'path'
 import bcrypt from 'bcryptjs'
@@ -8,11 +10,16 @@ config({ path: resolve(process.cwd(), '.env') })
 
 // DATABASE_URL'i environment'tan al veya default kullan ve process.env'e set et
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = 'postgresql://ebubekir:12345@localhost:5432/mesaidefteri?schema=public'
+  process.env.DATABASE_URL = 'postgresql://ebubekir:X4JABupdrdHi4T4wogc0kRnPHW8hhKr@172.18.0.2:5432/mesaidefteri?schema=public'
 }
 
-// PrismaClient oluştur - Prisma 7.2.0 için process.env.DATABASE_URL'i otomatik okur
-const prisma = new PrismaClient()
+// PostgreSQL adapter için connection pool oluştur
+const connectionString = process.env.DATABASE_URL
+const pool = new Pool({ connectionString })
+const adapter = new PrismaPg(pool)
+
+// PrismaClient oluştur - Prisma 7.2.0 için adapter gereklidir
+const prisma = new PrismaClient({ adapter })
 
 async function main() {
   console.log('🌱 Starting database seeding...')

@@ -23,6 +23,11 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   
+  // Output file tracing - standalone build için
+  outputFileTracingIncludes: {
+    '/api/**/*': ['./node_modules/**/*.wasm'],
+  },
+  
   // Image optimization
   images: {
     formats: ['image/avif', 'image/webp'],

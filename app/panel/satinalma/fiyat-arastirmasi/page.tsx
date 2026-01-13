@@ -1,7 +1,7 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
 import { Plus, Save, ArrowLeft, Edit2, CheckCircle2, Info, Camera, X, AlertCircle, Send, Loader2 } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import ImageUploader from '@/components/ui/ImageUploader'
@@ -35,7 +35,7 @@ interface PriceItem {
   saved?: boolean
 }
 
-export default function FiyatArastirmasiPage() {
+function FiyatArastirmasiContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const taskId = searchParams?.get('taskId') || null
@@ -1011,5 +1011,13 @@ export default function FiyatArastirmasiPage() {
         className="hidden"
       />
     </div>
+  )
+}
+
+export default function FiyatArastirmasiPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><Loader2 className="animate-spin" /></div>}>
+      <FiyatArastirmasiContent />
+    </Suspense>
   )
 }
